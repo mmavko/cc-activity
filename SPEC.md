@@ -54,6 +54,18 @@ client-side from local session files. No backend, no telemetry.
   and again by `cwd` after parsing, in case the encoded name doesn't match. The
   uid is machine-specific, so the digits are matched as `\d+`, and both `/tmp`
   and `/private/tmp` are accepted.
+- **Worktrees are folded into their repo.** A Claude Code worktree lives at
+  `<repo>/.claude/worktrees/<name>`, so its encoded folder name is exactly the
+  repo's encoded name followed by `--claude-worktrees-<name>` (one dash for the
+  slash, one for the dot in `.claude`). That prefix *is* the repo's folder key,
+  so the two are matched by exact key rather than by decoding a lossy path.
+  Merging sums the daily counts, the message total and the disk size, and takes
+  the earliest `first` and latest `last`. If the repo has no sessions of its own,
+  a row is created for it. This also reunites a session that began in the repo
+  and then entered a worktree: Claude Code stores that whole transcript under
+  the worktree's folder, with the `cwd` changing partway through the file.
+  A worktree created by hand outside that layout (`git worktree add ../foo-s2`)
+  is indistinguishable from a separate repo by path alone and stays separate.
 - The folder name for each project is a dash-encoded absolute path (e.g.
   `-Users-myron-dev-foo`). This encoding is lossy whenever a real path segment
   contains a literal hyphen (e.g. `claude-coding`), so it's not naively
@@ -143,6 +155,11 @@ scrollable), under a sticky topbar styled like a terminal prompt
   last-active label (`today` / `yesterday` / `Nd ago` / `Nw ago` / ISO date)
   with a native tooltip giving the exact date and time, and the project's
   disk size right-aligned on the same line.
+- A project that absorbed one or more worktrees gets a native tooltip on the
+  whole row (`includes 1 worktree: .claude/worktrees/s2`). Nothing is added to
+  the visible row: both lines are deliberate left/right pairs (name/count,
+  date/size) and a third value in either would break that rhythm at the
+  sidebar's width, where the name already truncates.
 - The footnote "runs 100% locally, nothing leaves this browser tab" is
   pinned to the bottom of the sidebar (flex column, not part of the
   scrolling list).
@@ -150,7 +167,9 @@ scrollable), under a sticky topbar styled like a terminal prompt
 ### Main panel
 
 - Heading shows the selected project's display name (or "all projects") and
-  a "tracking since `<date>`" subline.
+  a "tracking since `<date>`" subline. When the selected project absorbed
+  worktrees, the subline gains `· N worktrees merged in` — this is where a
+  reader asks why the count is what it is, so it's where the merge is stated.
 - Five stat blocks: **messages**, **active days**, **current streak** (in
   days, counting backward from today; today itself doesn't break the streak
   if it has no activity yet), **busiest day** (date + count), **disk size**.

@@ -428,6 +428,66 @@ button{
   const SCRATCHPAD_CWD_RE = /^\/(?:private\/)?tmp\/claude-\d+\//;
   const SCRATCHPAD_FOLDER_RE = /^-(?:private-)?tmp-claude-\d+-/;
 
+  // A Claude Code worktree lives at <repo>/.claude/worktrees/<name>, so its
+  // encoded folder name is the parent's encoded name plus '--claude-worktrees-'
+  // ('-' for the slash, '-' for the dot in '.claude'). That prefix IS the
+  // parent's folder key, so worktrees are matched to their repo by exact key
+  // rather than by decoding a lossy path. Worktrees made by hand elsewhere
+  // (git worktree add ../foo-s2) are indistinguishable from a separate repo
+  // by path alone and stay separate.
+  const WORKTREE_SEP = '--claude-worktrees-';
+  const WORKTREE_PATH_SEG = '/.claude/worktrees/';
+
+  function worktreeParentFolder(folderName){
+    const i = folderName.indexOf(WORKTREE_SEP);
+    return i === -1 ? null : folderName.slice(0, i);
+  }
+
+  function stripWorktreePath(path){
+    if (!path) return path;
+    const i = path.indexOf(WORKTREE_PATH_SEG);
+    return i === -1 ? path : path.slice(0, i);
+  }
+
+  // '-Users-me-dev-foo--claude-worktrees-s2' -> '.claude/worktrees/s2'
+  function worktreeLabel(folderName){
+    return '.claude/worktrees/' + folderName.slice(folderName.indexOf(WORKTREE_SEP) + WORKTREE_SEP.length);
+  }
+
+  // Fold each worktree project into the repo it belongs to. A session that
+  // starts in the repo and then enters a worktree is stored under the
+  // worktree's folder, so this also reunites the two halves of one session.
+  function mergeWorktrees(projects){
+    for (const [name, proj] of Array.from(projects)){
+      const parentName = worktreeParentFolder(name);
+      if (!parentName) continue;
+      let parent = projects.get(parentName);
+      if (!parent){
+        // repo itself has no sessions of its own — it exists only via worktrees
+        parent = { daily: new Map(), total: 0, first: null, last: null, cwd: null, diskSize: 0 };
+        projects.set(parentName, parent);
+      }
+      parent.cwd = stripWorktreePath(parent.cwd || proj.cwd) || naiveDecode(parentName);
+      for (const [k,v] of proj.daily){ parent.daily.set(k, (parent.daily.get(k)||0) + v); }
+      parent.total += proj.total;
+      parent.diskSize += proj.diskSize || 0;
+      if (proj.first && (!parent.first || proj.first < parent.first)) parent.first = proj.first;
+      if (proj.last && (!parent.last || proj.last > parent.last)) parent.last = proj.last;
+      if (!parent.worktrees) parent.worktrees = [];
+      parent.worktrees.push(worktreeLabel(name));
+      projects.delete(name);
+    }
+    for (const proj of projects.values()){
+      if (proj.worktrees) proj.worktrees.sort();
+    }
+  }
+
+  function worktreeNote(proj){
+    if (!proj || !proj.worktrees || !proj.worktrees.length) return '';
+    const n = proj.worktrees.length;
+    return n + (n === 1 ? ' worktree' : ' worktrees');
+  }
+
   function localDateKey(date){
     const y = date.getFullYear();
     const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -524,6 +584,8 @@ button{
     for (const [name, proj] of projects){
       if (proj.cwd && SCRATCHPAD_CWD_RE.test(proj.cwd)) projects.delete(name);
     }
+
+    mergeWorktrees(projects);
 
     return projects;
   }
@@ -622,6 +684,8 @@ button{
     for (const it of items){
       const div = document.createElement('div');
       div.className = 'proj-item' + (it.isAll ? ' all' : '') + (it.key === selectedKey ? ' active' : '');
+      const note = worktreeNote(it.proj);
+      if (note) div.title = 'includes ' + note + ': ' + it.proj.worktrees.join(', ');
       div.innerHTML =
         '<div class="row1"><span class="name">' + escapeHtml(it.label) + '</span>' +
         '<span class="count">' + it.proj.total + '</span></div>' +
@@ -666,9 +730,10 @@ button{
     const label = selectedKey === 'ALL' ? 'all projects' : displayName(selectedKey, proj);
 
     els.mainTitle.textContent = label;
-    els.mainSub.textContent = proj.first
+    const note = selectedKey === 'ALL' ? '' : worktreeNote(proj);
+    els.mainSub.textContent = (proj.first
       ? ('tracking since ' + proj.first.toISOString().slice(0,10))
-      : 'no activity recorded';
+      : 'no activity recorded') + (note ? ' \u00b7 ' + note + ' merged in' : '');
 
     els.statTotal.textContent = proj.total.toLocaleString();
     els.statDays.textContent = proj.daily.size.toLocaleString();
