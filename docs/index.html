@@ -420,6 +420,14 @@ button{
     return folderName.replace(/^-/, '/').replace(/-/g, '/');
   }
 
+  // Claude Code gives every session a scratchpad under /tmp/claude-<uid>/.
+  // An agent that starts a session with its cwd inside one makes Claude Code
+  // register that temp path as a "project" of its own — real transcripts, but
+  // agent-authored and rooted in a directory that will be deleted. Drop them.
+  // The uid is machine-specific (501 on this Mac), hence the \d+.
+  const SCRATCHPAD_CWD_RE = /^\/(?:private\/)?tmp\/claude-\d+\//;
+  const SCRATCHPAD_FOLDER_RE = /^-(?:private-)?tmp-claude-\d+-/;
+
   function localDateKey(date){
     const y = date.getFullYear();
     const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -448,7 +456,9 @@ button{
     // first pass: count files for progress bar
     const dirEntries = [];
     for await (const [name, handle] of rootHandle.entries()){
-      if (handle.kind === 'directory') dirEntries.push([name, handle]);
+      if (handle.kind !== 'directory') continue;
+      if (SCRATCHPAD_FOLDER_RE.test(name)) continue; // session scratchpad, not a project
+      dirEntries.push([name, handle]);
     }
 
     const projectFiles = []; // [{ folderName, fileHandle }]
@@ -507,6 +517,12 @@ button{
       }
       done++;
       if (onProgress) onProgress(done, totalSteps);
+    }
+
+    // Second guard, on the authoritative cwd: catches a scratchpad project
+    // whose folder name didn't match the encoded pattern above.
+    for (const [name, proj] of projects){
+      if (proj.cwd && SCRATCHPAD_CWD_RE.test(proj.cwd)) projects.delete(name);
     }
 
     return projects;

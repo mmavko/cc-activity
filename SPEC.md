@@ -45,6 +45,15 @@ client-side from local session files. No backend, no telemetry.
   shell snapshots, anything else), summing `File.size`. This is the *true*
   on-disk footprint of the project, not just the top-level session files used
   for message counting — the two scopes are intentionally different.
+- **Session scratchpads are excluded.** Claude Code gives each session a
+  temp directory at `/tmp/claude-<uid>/<encoded-cwd>/<session-uuid>/scratchpad`.
+  When an agent starts a session whose cwd is inside one, Claude Code registers
+  that temp path as a project in its own right. Those transcripts are real but
+  agent-authored, and their directory is disposable, so they're dropped twice
+  over: by folder name (`-private-tmp-claude-<digits>-…`) before any parsing,
+  and again by `cwd` after parsing, in case the encoded name doesn't match. The
+  uid is machine-specific, so the digits are matched as `\d+`, and both `/tmp`
+  and `/private/tmp` are accepted.
 - The folder name for each project is a dash-encoded absolute path (e.g.
   `-Users-myron-dev-foo`). This encoding is lossy whenever a real path segment
   contains a literal hyphen (e.g. `claude-coding`), so it's not naively
